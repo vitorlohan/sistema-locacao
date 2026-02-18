@@ -5,14 +5,14 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import {
   validateLicense,
-  isActivated,
-  activateLicense,
   getLicenseInfo,
   getMachineId,
   getHostname,
+  LicenseStorage,
 } from 'key-license-manager';
+import type { LicensePlan } from 'key-license-manager';
 import config from '../../config';
-import { collectHardwareInfo, type HardwareInfo } from '../../utils/hardware';
+import { collectHardwareInfo } from '../../utils/hardware';
 
 const router = Router();
 
@@ -23,6 +23,14 @@ function getOptions() {
     secret: config.license.secret,
     storagePath: config.license.storagePath,
   };
+}
+
+/**
+ * Retorna o machine_id do SDK (usado para salvar/validar .license).
+ * IMPORTANTE: usar SEMPRE este para consistência com o arquivo local.
+ */
+function getConsistentMachineId(): string {
+  return getMachineId();
 }
 
 // -------  Online Validation Cache  -------
@@ -54,7 +62,8 @@ async function checkLicenseOnline(): Promise<OnlineCheckResult> {
       return lastOnlineCheck;
     }
 
-    const machineId = getMachineId();
+    // IMPORTANTE: usar o MESMO machineId que foi salvo no .license (SDK getMachineId)
+    const machineId = getConsistentMachineId();
     const hwInfo = collectHardwareInfo();
     const serverUrl = config.license.serverUrl.replace(/\/$/, '');
 
@@ -66,14 +75,14 @@ async function checkLicenseOnline(): Promise<OnlineCheckResult> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         key: info.key,
-        machine_id: hwInfo.machine_id,
-        hostname: hwInfo.hostname,
+        machine_id: machineId, // CORRIGIDO: usar SDK machineId (consistente com .license)
         hardware: {
           cpu_id: hwInfo.cpu_id,
           cpu_model: hwInfo.cpu_model,
           cpu_cores: hwInfo.cpu_cores,
           disk_serial: hwInfo.disk_serial,
           mac_addresses: hwInfo.mac_addresses,
+          hostname: hwInfo.hostname,
           username: hwInfo.username,
           platform: hwInfo.platform,
           arch: hwInfo.arch,
@@ -90,10 +99,10 @@ async function checkLicenseOnline(): Promise<OnlineCheckResult> {
       return lastOnlineCheck;
     }
 
-    const data = await response.json() as { valid: boolean; message?: string };
+    const data = await response.json() as { valid: boolean; message?: string; error?: string };
     lastOnlineCheck = {
       valid: data.valid,
-      reason: data.valid ? undefined : (data.message || 'Licença inválida no servidor.'),
+      reason: data.valid ? undefined : (data.error || data.message || 'Licença inválida no servidor.'),
       checkedAt: Date.now(),
     };
     return lastOnlineCheck;
@@ -118,7 +127,7 @@ export function invalidateOnlineCache(): void {
 /**
  * Middleware que verifica se o sistema está licenciado.
  * 1. Valida o arquivo local (.license) — offline
- * 2. Valida ONLINE contra o servidor central (se possível)
+ * 2. Valida ONLINE contra o servidor central (se possível, não bloqueia offline)
  * Bloqueia se não houver licença local válida. Funciona offline após ativação.
  */
 export function licenseGuard(req: Request, res: Response, next: NextFunction): void {
@@ -146,10 +155,11 @@ export function licenseGuard(req: Request, res: Response, next: NextFunction): v
     return;
   }
 
-  // 2. Verificação online (obrigatória — sem internet = bloqueado)
+  // 2. Verificação online (não-bloqueante — funciona offline após ativação)
   checkLicenseOnline()
     .then((onlineResult) => {
       if (!onlineResult.valid) {
+        // Se a verificação online diz que é inválido, bloqueia
         res.status(403).json({
           error: true,
           licensed: false,
@@ -161,12 +171,8 @@ export function licenseGuard(req: Request, res: Response, next: NextFunction): v
       next();
     })
     .catch(() => {
-      res.status(403).json({
-        error: true,
-        licensed: false,
-        message: 'Falha na verificação de licença',
-        reason: 'Sem conexão com o servidor de licenças.',
-      });
+      // Falha de rede → permite continuar (licença local já foi validada)
+      next();
     });
 }
 
@@ -176,9 +182,14 @@ export function licenseGuard(req: Request, res: Response, next: NextFunction): v
 router.get('/status', (_req: Request, res: Response) => {
   try {
     const info = getLicenseInfo(getOptions());
+    const maskKey = (k: string) => {
+      if (k.length <= 9) return k;
+      const parts = k.split('-');
+      return parts.map((p, i) => (i === 0 || i === parts.length - 1) ? p : '****').join('-');
+    };
     res.json({
       licensed: info.activated,
-      key: info.key ? `${info.key.substring(0, 4)}-****-****-${info.key.substring(15)}` : null,
+      key: info.key ? maskKey(info.key) : null,
       plan: info.plan || null,
       product: info.product || null,
       activatedAt: info.activatedAt || null,
@@ -190,7 +201,16 @@ router.get('/status', (_req: Request, res: Response) => {
   }
 });
 
-/** POST /api/license/activate — ativar licença */
+/**
+ * POST /api/license/activate — ativar licença
+ *
+ * NÃO usa activateLicense() do SDK pois:
+ *  - SDK regex só aceita 4 blocos (server gera 5)
+ *  - SDK envia machineId (camelCase), server espera machine_id (snake_case)
+ *  - SDK espera { success, message, license: {..., signature} }, server retorna { activation, license }
+ *
+ * Solução: fazer a chamada HTTP diretamente e salvar com LicenseStorage do SDK.
+ */
 router.post('/activate', async (req: Request, res: Response) => {
   try {
     const { key } = req.body;
@@ -203,66 +223,97 @@ router.post('/activate', async (req: Request, res: Response) => {
     // Validar formato (aceita 4 ou 5 blocos)
     const normalized = key.trim().toUpperCase();
     if (!/^[A-Z0-9]{4}(-[A-Z0-9]{4}){3,4}$/.test(normalized)) {
-      res.status(400).json({ success: false, message: 'Formato inválido. Use XXXX-XXXX-XXXX-XXXX-XXXX.' });
+      res.status(400).json({ success: false, message: 'Formato inválido. Use XXXX-XXXX-XXXX-XXXX ou XXXX-XXXX-XXXX-XXXX-XXXX.' });
       return;
     }
 
-    // Coletar dados de hardware detalhados
+    // Usar o MESMO machineId que o SDK usa para validação local
+    const machineId = getConsistentMachineId();
+    const hostname = getHostname();
     const hwInfo = collectHardwareInfo();
 
-    const result = await activateLicense(normalized, {
-      serverUrl: config.license.serverUrl,
-      secret: config.license.secret,
-      storagePath: config.license.storagePath,
-      timeout: 15000,
+    const serverUrl = config.license.serverUrl.replace(/\/$/, '');
+
+    // 1. Chamar central-licencas diretamente (enviando machine_id em snake_case)
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+
+    const response = await fetch(`${serverUrl}/api/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: normalized,
+        machine_id: machineId, // snake_case — como o servidor espera
+        hostname,
+        hardware: {
+          cpu_id: hwInfo.cpu_id,
+          cpu_model: hwInfo.cpu_model,
+          cpu_cores: hwInfo.cpu_cores,
+          disk_serial: hwInfo.disk_serial,
+          mac_addresses: hwInfo.mac_addresses,
+          username: hwInfo.username,
+          platform: hwInfo.platform,
+          arch: hwInfo.arch,
+          total_memory: hwInfo.total_memory,
+        },
+      }),
+      signal: controller.signal,
     });
 
-    // Enviar dados de hardware para o central-licencas (fire-and-forget)
-    try {
-      const serverUrl = config.license.serverUrl.replace(/\/$/, '');
-      await fetch(`${serverUrl}/api/activate/hardware`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: normalized,
-          machine_id: hwInfo.machine_id,
-          hostname: hwInfo.hostname,
-          hardware: {
-            cpu_id: hwInfo.cpu_id,
-            cpu_model: hwInfo.cpu_model,
-            cpu_cores: hwInfo.cpu_cores,
-            disk_serial: hwInfo.disk_serial,
-            mac_addresses: hwInfo.mac_addresses,
-            username: hwInfo.username,
-            platform: hwInfo.platform,
-            arch: hwInfo.arch,
-            total_memory: hwInfo.total_memory,
-          },
-        }),
-      });
-    } catch { /* silently fail — não bloqueia ativação */ }
+    clearTimeout(timer);
 
-    if (result.success) {
-      // Invalida cache online para forçar nova verificação
-      invalidateOnlineCache();
+    const body = await response.json() as any;
 
-      const info = getLicenseInfo(getOptions());
-      res.json({
-        success: true,
-        message: result.message,
-        license: {
-          plan: info.plan,
-          product: info.product,
-          activatedAt: info.activatedAt,
-          expiresAt: info.expiresAt,
-        },
+    if (!response.ok) {
+      res.status(response.status).json({
+        success: false,
+        message: body.error || body.message || 'Falha na ativação.',
       });
       return;
     }
 
-    res.status(400).json(result);
+    // 2. Resposta do central-licencas: { activation, license }
+    //    Precisamos converter para o formato do LicenseStorage do SDK
+    const serverLicense = body.license;
+    if (!serverLicense) {
+      res.status(400).json({ success: false, message: 'Resposta do servidor não contém dados da licença.' });
+      return;
+    }
+
+    // 3. Salvar licença localmente usando LicenseStorage (criptografada + HMAC)
+    const storage = new LicenseStorage(config.license.secret, config.license.storagePath);
+    storage.save({
+      key: normalized,
+      plan: (serverLicense.plan || 'basic') as LicensePlan,
+      product: serverLicense.product || 'sistema-locacao',
+      machineId, // MESMO machineId do SDK — vai bater na validação local
+      activatedAt: body.activation?.activated_at || new Date().toISOString(),
+      expiresAt: serverLicense.expires_at || null,
+    });
+
+    // 4. Invalida cache online para forçar nova verificação
+    invalidateOnlineCache();
+
+    // 5. Confirma leitura do que foi salvo
+    const info = getLicenseInfo(getOptions());
+
+    res.json({
+      success: true,
+      message: 'Licença ativada com sucesso!',
+      license: {
+        plan: info.plan || serverLicense.plan,
+        product: info.product || serverLicense.product,
+        activatedAt: info.activatedAt || body.activation?.activated_at,
+        expiresAt: info.expiresAt || serverLicense.expires_at,
+      },
+    });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
+    if (err.name === 'AbortError') {
+      res.status(504).json({ success: false, message: 'Timeout ao conectar ao servidor de licenças.' });
+      return;
+    }
+    console.error('[License] Erro na ativação:', err);
+    res.status(500).json({ success: false, message: err.message || 'Erro interno na ativação.' });
   }
 });
 
@@ -270,9 +321,10 @@ router.post('/activate', async (req: Request, res: Response) => {
 router.get('/machine', (_req: Request, res: Response) => {
   try {
     const hwInfo = collectHardwareInfo();
+    const sdkMachineId = getConsistentMachineId();
     res.json({
-      machineId: hwInfo.machine_id,
-      hostname: hwInfo.hostname,
+      machineId: sdkMachineId,
+      hostname: getHostname(),
       hardware: {
         cpu_id: hwInfo.cpu_id,
         cpu_model: hwInfo.cpu_model,
@@ -284,7 +336,7 @@ router.get('/machine', (_req: Request, res: Response) => {
         platform: hwInfo.platform,
         arch: hwInfo.arch,
         total_memory: hwInfo.total_memory,
-        machine_id: hwInfo.machine_id,
+        machine_id: sdkMachineId,
       },
     });
   } catch (err: any) {

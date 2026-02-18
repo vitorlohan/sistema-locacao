@@ -67,7 +67,7 @@ export default function LicenseActivationPage() {
   }
 
   function formatKey(raw: string): string {
-    const clean = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16);
+    const clean = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 20);
     const parts: string[] = [];
     for (let i = 0; i < clean.length; i += 4) {
       parts.push(clean.slice(i, i + 4));
@@ -81,8 +81,9 @@ export default function LicenseActivationPage() {
 
   async function handleActivate(e: FormEvent) {
     e.preventDefault();
-    if (!key || key.length !== 19) {
-      toast.error('Digite uma chave válida no formato XXXX-XXXX-XXXX-XXXX');
+    // Aceita 4 blocos (19 chars) ou 5 blocos (24 chars)
+    if (!key || (key.length !== 19 && key.length !== 24)) {
+      toast.error('Digite uma chave válida no formato XXXX-XXXX-XXXX-XXXX-XXXX');
       return;
     }
     setLoading(true);
@@ -241,8 +242,8 @@ export default function LicenseActivationPage() {
               type="text"
               value={key}
               onChange={(e) => handleKeyChange(e.target.value)}
-              placeholder="XXXX-XXXX-XXXX-XXXX"
-              maxLength={19}
+              placeholder="XXXX-XXXX-XXXX-XXXX-XXXX"
+              maxLength={24}
               autoFocus
               spellCheck={false}
               autoComplete="off"
@@ -252,7 +253,7 @@ export default function LicenseActivationPage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={loading || key.length !== 19}
+            disabled={loading || (key.length !== 19 && key.length !== 24)}
             style={{ width: '100%' }}
           >
             {loading ? 'Ativando...' : 'Ativar Licença'}
@@ -263,7 +264,7 @@ export default function LicenseActivationPage() {
           <p>
             Entre em contato com o administrador para obter sua chave de licença.
             <br />
-            Formato: <strong>XXXX-XXXX-XXXX-XXXX</strong>
+            Formato: <strong>XXXX-XXXX-XXXX-XXXX-XXXX</strong>
           </p>
         </div>
       </div>
