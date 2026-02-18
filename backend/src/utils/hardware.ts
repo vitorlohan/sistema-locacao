@@ -22,18 +22,19 @@ export interface HardwareInfo {
 }
 
 /**
- * Tenta obter o serial do processador via WMIC (Windows)
+ * Tenta obter o serial do processador via PowerShell (Windows)
+ * Usa Get-CimInstance em vez de WMIC (descontinuado no Windows 11+)
  */
 function getCpuId(): string {
   try {
     if (process.platform === 'win32') {
-      const result = execSync('wmic cpu get ProcessorId /format:value', {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-      });
-      const match = result.match(/ProcessorId=(\S+)/);
-      if (match) return match[1].trim();
+      // PowerShell Get-CimInstance (funciona em todas as versões do Windows 10/11)
+      const result = execSync(
+        'powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).ProcessorId"',
+        { encoding: 'utf-8', timeout: 10000, windowsHide: true },
+      );
+      const id = result.trim();
+      if (id && id !== '' && !id.includes('Error')) return id;
     }
   } catch { /* silently fail */ }
   
@@ -46,18 +47,18 @@ function getCpuId(): string {
 }
 
 /**
- * Tenta obter o serial do disco principal via WMIC (Windows)
+ * Tenta obter o serial do disco principal via PowerShell (Windows)
+ * Usa Get-CimInstance em vez de WMIC (descontinuado no Windows 11+)
  */
 function getDiskSerial(): string {
   try {
     if (process.platform === 'win32') {
-      const result = execSync('wmic diskdrive get SerialNumber /format:value', {
-        encoding: 'utf-8',
-        timeout: 5000,
-        windowsHide: true,
-      });
-      const match = result.match(/SerialNumber=(\S+)/);
-      if (match) return match[1].trim();
+      const result = execSync(
+        'powershell -NoProfile -Command "(Get-CimInstance Win32_DiskDrive | Select-Object -First 1).SerialNumber"',
+        { encoding: 'utf-8', timeout: 10000, windowsHide: true },
+      );
+      const serial = result.trim();
+      if (serial && serial !== '' && !serial.includes('Error')) return serial;
     }
   } catch { /* silently fail */ }
 
