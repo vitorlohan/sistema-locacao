@@ -137,8 +137,15 @@ export function licenseGuard(req: Request, res: Response, next: NextFunction): v
     return;
   }
 
-  // Permite rotas de licença sempre
-  if (req.path.startsWith('/api/license')) {
+  // Permite rotas que NÃO são /api/ — SPA precisa carregar livremente
+  // (ex: /ativar, /login, / são servidas pelo SPA fallback)
+  if (!req.path.startsWith('/api/') && !req.path.startsWith('/api')) {
+    next();
+    return;
+  }
+
+  // Permite rotas de licença e health sempre
+  if (req.path.startsWith('/api/license') || req.path === '/api/health') {
     next();
     return;
   }
