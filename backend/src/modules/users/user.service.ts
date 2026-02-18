@@ -1,5 +1,5 @@
 import { getDatabase } from '../../database';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { ConflictError, NotFoundError, ValidationError } from '../../utils/errors';
 
 interface CreateUserInput {

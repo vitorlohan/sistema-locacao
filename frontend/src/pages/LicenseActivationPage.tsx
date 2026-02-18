@@ -12,14 +12,37 @@ interface LicenseStatus {
   machineId?: string | null;
 }
 
+interface MachineHardware {
+  cpu_id: string;
+  cpu_model: string;
+  cpu_cores: number;
+  disk_serial: string;
+  mac_addresses: string[];
+  hostname: string;
+  username: string;
+  platform: string;
+  arch: string;
+  total_memory: string;
+  machine_id: string;
+}
+
+interface MachineInfo {
+  machineId: string;
+  hostname: string;
+  hardware: MachineHardware;
+}
+
 export default function LicenseActivationPage() {
   const [key, setKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [status, setStatus] = useState<LicenseStatus | null>(null);
+  const [machineInfo, setMachineInfo] = useState<MachineInfo | null>(null);
+  const [showHardware, setShowHardware] = useState(false);
 
   useEffect(() => {
     checkStatus();
+    loadMachineInfo();
   }, []);
 
   async function checkStatus() {
@@ -31,6 +54,15 @@ export default function LicenseActivationPage() {
       setStatus(null);
     } finally {
       setChecking(false);
+    }
+  }
+
+  async function loadMachineInfo() {
+    try {
+      const { data } = await api.get('/license/machine');
+      setMachineInfo(data);
+    } catch {
+      // silently fail
     }
   }
 
@@ -125,6 +157,63 @@ export default function LicenseActivationPage() {
               </div>
             )}
           </div>
+
+          {machineInfo?.hardware && (
+            <>
+              <button
+                className="btn btn-outline"
+                onClick={() => setShowHardware(!showHardware)}
+                style={{ marginTop: 16, width: '100%', fontSize: '0.85rem' }}
+              >
+                {showHardware ? '▲ Ocultar' : '▼ Dados do Hardware'}
+              </button>
+              {showHardware && (
+                <div className="hardware-info" style={{ marginTop: 12 }}>
+                  <div className="info-row">
+                    <span className="info-label">CPU ID:</span>
+                    <span className="info-value" style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{machineInfo.hardware.cpu_id}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">CPU:</span>
+                    <span className="info-value">{machineInfo.hardware.cpu_model}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Cores:</span>
+                    <span className="info-value">{machineInfo.hardware.cpu_cores}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Serial do Disco:</span>
+                    <span className="info-value" style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{machineInfo.hardware.disk_serial}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">MAC Address:</span>
+                    <span className="info-value" style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{machineInfo.hardware.mac_addresses.join(', ')}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Hostname:</span>
+                    <span className="info-value">{machineInfo.hardware.hostname}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Usuário:</span>
+                    <span className="info-value">{machineInfo.hardware.username}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">SO:</span>
+                    <span className="info-value">{machineInfo.hardware.platform} ({machineInfo.hardware.arch})</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Memória:</span>
+                    <span className="info-value">{machineInfo.hardware.total_memory}</span>
+                  </div>
+                  <div className="info-row">
+                    <span className="info-label">Machine ID:</span>
+                    <span className="info-value" style={{ fontFamily: 'monospace', fontSize: '0.7rem', wordBreak: 'break-all' }}>{machineInfo.hardware.machine_id}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
           <button
             className="btn btn-primary"
             onClick={() => (window.location.href = '/login')}

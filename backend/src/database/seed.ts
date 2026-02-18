@@ -1,5 +1,5 @@
 import { getDatabase } from './connection';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 export async function seedDefaultUser(): Promise<void> {
   const db = getDatabase();

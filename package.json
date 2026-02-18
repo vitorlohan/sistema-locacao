@@ -2,16 +2,89 @@
   "name": "sistema-locacao",
   "version": "1.0.0",
   "private": true,
-  "description": "Sistema de Locação de Itens - Monorepo",
+  "description": "Sistema de Locação de Itens",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "dev:electron": "concurrently -n backend,electron -c blue,cyan \"npm run dev --prefix backend\" \"wait-on http-get://localhost:3000/api/health -t 30000 && electron .\"",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
-    "build": "npm run build --prefix frontend && npm run build --prefix backend",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && npm run build",
+    "build": "npm run build:frontend && npm run build:backend",
     "start": "npm start --prefix backend",
-    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+    "electron:dev": "electron .",
+    "dist": "npm run build && electron-builder --win",
+    "dist:dir": "npm run build && electron-builder --win --dir",
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "postinstall": "npm run install:all"
+  },
+  "build": {
+    "appId": "com.sistemalocacao.app",
+    "productName": "Sistema de Locação",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/",
+        "to": "backend/dist/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "backend/public/",
+        "to": "backend/public/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "backend/node_modules/",
+        "to": "backend/node_modules/",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "backend/package.json",
+        "to": "backend/package.json"
+      },
+      {
+        "from": "electron/icon.ico",
+        "to": "electron/icon.ico"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/icon.ico",
+      "signAndEditExecutable": false,
+      "sign": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Sistema de Locação",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.3"
   }
 }

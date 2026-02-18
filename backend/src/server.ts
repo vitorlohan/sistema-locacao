@@ -44,10 +44,7 @@ app.use(
 // License routes (antes do guard para permitir ativação)
 app.use('/api/license', licenseRoutes);
 
-// License guard — bloqueia sistema se não licenciado
-app.use(licenseGuard);
-
-// Health check
+// Health check (antes do guard — sempre acessível)
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'online',
@@ -55,6 +52,16 @@ app.get('/api/health', (_req, res) => {
     uptime: process.uptime(),
   });
 });
+
+// Serve frontend estático ANTES do guard (produção)
+// Assim a página de ativação de licença fica sempre acessível
+const publicDir = path.resolve(__dirname, '..', 'public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+}
+
+// License guard — bloqueia sistema (API) se não licenciado
+app.use(licenseGuard);
 
 // Rotas da API
 app.use('/api/auth', authRoutes);
@@ -67,11 +74,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/cashier', cashierRoutes);
 
-// Serve frontend estático (produção)
-const publicDir = path.resolve(__dirname, '..', 'public');
+// SPA fallback: rotas que não são /api retornam index.html
 if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir));
-  // SPA fallback: rotas que não são /api retornam index.html
   app.get(/^\/(?!api).*/, (_req, res) => {
     res.sendFile(path.join(publicDir, 'index.html'));
   });
@@ -87,79 +91,71 @@ app.use(errorHandler);
 
 async function bootstrap(): Promise<void> {
   try {
-    console.log('===========================================');
-    console.log('  SISTEMA DE LOCAÇÃO - Iniciando...');
-    console.log('===========================================\n');
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    if (!isProduction) {
+      console.log('===========================================');
+      console.log('  SISTEMA DE LOCAÇÃO - Iniciando...');
+      console.log('===========================================\n');
+    }
 
     // License check
-    console.log('🔑 Verificando licença...');
+    if (!isProduction) console.log('🔑 Verificando licença...');
     const { validateLicense: checkLicense } = await import('key-license-manager');
     const licResult = checkLicense({
       secret: config.license.secret,
       storagePath: config.license.storagePath,
     });
-    if (licResult.valid) {
-      console.log('  ✅ Licença válida!');
-    } else {
-      console.log('  ⚠️  Sistema NÃO licenciado — ative em /ativar');
+    if (!isProduction) {
+      if (licResult.valid) {
+        console.log('  ✅ Licença válida!');
+      } else {
+        console.log('  ⚠️  Sistema NÃO licenciado — ative em /ativar');
+      }
     }
 
     // Database
-    console.log('📦 Configurando banco de dados...');
+    if (!isProduction) console.log('📦 Configurando banco de dados...');
     runMigrations();
 
     // Seed
-    console.log('👤 Verificando usuário padrão...');
+    if (!isProduction) console.log('👤 Verificando usuário padrão...');
     await seedDefaultUser();
 
     // Cleanup expired sessions
-    console.log('🔒 Limpando sessões expiradas...');
+    if (!isProduction) console.log('🔒 Limpando sessões expiradas...');
     const cleaned = sessionService.cleanExpiredSessions();
-    if (cleaned > 0) console.log(`  ${cleaned} sessão(ões) expirada(s) removida(s)`);
+    if (!isProduction && cleaned > 0) console.log(`  ${cleaned} sessão(ões) expirada(s) removida(s)`);
 
     // Backup
-    console.log('💾 Configurando backup automático...');
+    if (!isProduction) console.log('💾 Configurando backup automático...');
     backupService.start();
 
     // Server
     const server = app.listen(config.server.port, config.server.host, () => {
-      console.log('\n===========================================');
-      console.log('  ✅ Servidor iniciado com sucesso!');
-      console.log('===========================================');
-      console.log(`  Local:    http://localhost:${config.server.port}`);
-      console.log(`  Rede:     http://${config.server.localIP}:${config.server.port}`);
-      console.log(`  API Base: /api`);
-      console.log('===========================================');
-      console.log('\n  Rotas disponíveis:');
-      console.log('  POST   /api/auth/login');
-      console.log('  POST   /api/auth/refresh');
-      console.log('  POST   /api/auth/logout');
-      console.log('  POST   /api/auth/logout-all');
-      console.log('  GET    /api/auth/me');
-      console.log('  GET    /api/auth/sessions');
-      console.log('  GET    /api/auth/logs/login    (admin)');
-      console.log('  GET    /api/auth/logs/audit    (admin)');
-      console.log('  GET    /api/users');
-      console.log('  GET    /api/clients');
-      console.log('  GET    /api/items');
-      console.log('  GET    /api/rentals');
-      console.log('  GET    /api/payments');
-      console.log('  GET    /api/reports/dashboard');
-      console.log('  POST   /api/cashier/open');
-      console.log('  POST   /api/cashier/:id/close');
-      console.log('  POST   /api/cashier/entry');
-      console.log('  POST   /api/cashier/exit');
-      console.log('  GET    /api/cashier');
-      console.log('  GET    /api/cashier/report/daily');
-      console.log('  GET    /api/cashier/report/period');
-      console.log('  POST   /api/backup/create');
-      console.log('  GET    /api/backup/list');
-      console.log('  GET    /api/health');
-      console.log('  GET    /api/license/status');
-      console.log('  POST   /api/license/activate');
-      console.log('  GET    /api/license/validate');
-      console.log('  GET    /api/license/machine');
-      console.log('===========================================\n');
+      if (isProduction) {
+        // Produção: output mínimo para o usuário
+        console.log('');
+        console.log('  ✅ Sistema iniciado com sucesso!');
+        console.log('');
+        console.log(`  Acesse: http://localhost:${config.server.port}`);
+        if (!licResult.valid) {
+          console.log('');
+          console.log('  ⚠️  Sistema nao licenciado — ative em /ativar');
+        }
+        console.log('');
+        console.log('  Nao feche esta janela enquanto estiver usando o sistema.');
+        console.log('');
+      } else {
+        // Desenvolvimento: output completo
+        console.log('\n===========================================');
+        console.log('  ✅ Servidor iniciado com sucesso!');
+        console.log('===========================================');
+        console.log(`  Local:    http://localhost:${config.server.port}`);
+        console.log(`  Rede:     http://${config.server.localIP}:${config.server.port}`);
+        console.log(`  API Base: /api`);
+        console.log('===========================================\n');
+      }
     });
 
     // Graceful shutdown

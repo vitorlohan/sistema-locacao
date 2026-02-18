@@ -15,10 +15,6 @@ export function diffInDays(start: Date, end: Date): number {
   return Math.ceil(diffInHours(start, end) / 24);
 }
 
-export function nowISO(): string {
-  return new Date().toISOString();
-}
-
 /** Returns current Brasilia time (UTC-3) as ISO-like string (YYYY-MM-DDTHH:mm:ss) */
 export function localNow(): string {
   const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));

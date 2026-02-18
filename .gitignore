@@ -2,3 +2,22 @@ node_modules/
 dist/
 .env
 *.local
+
+# Electron
+release/
+*.exe
+*.blockmap
+*.yml
+
+# Build artifacts
+*.tsbuildinfo
+installer/
+
+# Data
+data/
+backups/
+*.db
+*.db-shm
+*.db-wal
+.license
+.backup-settings.json

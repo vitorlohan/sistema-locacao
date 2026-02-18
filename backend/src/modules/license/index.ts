@@ -1,6 +1,6 @@
 // ============================================================
 // sistema-locacao — License Module
-// Integrates key-license-manager client SDK
+// Integrates key-license-manager client SDK + hardware fingerprint
 // ============================================================
 import { Router, Request, Response, NextFunction } from 'express';
 import {
@@ -12,6 +12,7 @@ import {
   getHostname,
 } from 'key-license-manager';
 import config from '../../config';
+import { collectHardwareInfo, type HardwareInfo } from '../../utils/hardware';
 
 const router = Router();
 
@@ -54,6 +55,7 @@ async function checkLicenseOnline(): Promise<OnlineCheckResult> {
     }
 
     const machineId = getMachineId();
+    const hwInfo = collectHardwareInfo();
     const serverUrl = config.license.serverUrl.replace(/\/$/, '');
 
     const controller = new AbortController();
@@ -62,7 +64,22 @@ async function checkLicenseOnline(): Promise<OnlineCheckResult> {
     const response = await fetch(`${serverUrl}/api/validate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: info.key, machineId }),
+      body: JSON.stringify({
+        key: info.key,
+        machine_id: hwInfo.machine_id,
+        hostname: hwInfo.hostname,
+        hardware: {
+          cpu_id: hwInfo.cpu_id,
+          cpu_model: hwInfo.cpu_model,
+          cpu_cores: hwInfo.cpu_cores,
+          disk_serial: hwInfo.disk_serial,
+          mac_addresses: hwInfo.mac_addresses,
+          username: hwInfo.username,
+          platform: hwInfo.platform,
+          arch: hwInfo.arch,
+          total_memory: hwInfo.total_memory,
+        },
+      }),
       signal: controller.signal,
     });
 
@@ -105,11 +122,14 @@ export function invalidateOnlineCache(): void {
  * Bloqueia se não houver licença local válida. Funciona offline após ativação.
  */
 export function licenseGuard(req: Request, res: Response, next: NextFunction): void {
-  // Permite rotas de licença e health check sempre
-  if (
-    req.path.startsWith('/api/license') ||
-    req.path === '/api/health'
-  ) {
+  // Em desenvolvimento, pula verificação de licença
+  if (process.env.NODE_ENV !== 'production' && process.env.SKIP_LICENSE !== 'false') {
+    next();
+    return;
+  }
+
+  // Permite rotas de licença sempre
+  if (req.path.startsWith('/api/license')) {
     next();
     return;
   }
@@ -187,12 +207,40 @@ router.post('/activate', async (req: Request, res: Response) => {
       return;
     }
 
+    // Coletar dados de hardware detalhados
+    const hwInfo = collectHardwareInfo();
+
     const result = await activateLicense(normalized, {
       serverUrl: config.license.serverUrl,
       secret: config.license.secret,
       storagePath: config.license.storagePath,
       timeout: 15000,
     });
+
+    // Enviar dados de hardware para o central-licencas (fire-and-forget)
+    try {
+      const serverUrl = config.license.serverUrl.replace(/\/$/, '');
+      await fetch(`${serverUrl}/api/activate/hardware`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key: normalized,
+          machine_id: hwInfo.machine_id,
+          hostname: hwInfo.hostname,
+          hardware: {
+            cpu_id: hwInfo.cpu_id,
+            cpu_model: hwInfo.cpu_model,
+            cpu_cores: hwInfo.cpu_cores,
+            disk_serial: hwInfo.disk_serial,
+            mac_addresses: hwInfo.mac_addresses,
+            username: hwInfo.username,
+            platform: hwInfo.platform,
+            arch: hwInfo.arch,
+            total_memory: hwInfo.total_memory,
+          },
+        }),
+      });
+    } catch { /* silently fail — não bloqueia ativação */ }
 
     if (result.success) {
       // Invalida cache online para forçar nova verificação
@@ -218,12 +266,30 @@ router.post('/activate', async (req: Request, res: Response) => {
   }
 });
 
-/** GET /api/license/machine — informações da máquina */
+/** GET /api/license/machine — informações detalhadas da máquina */
 router.get('/machine', (_req: Request, res: Response) => {
-  res.json({
-    machineId: getMachineId(),
-    hostname: getHostname(),
-  });
+  try {
+    const hwInfo = collectHardwareInfo();
+    res.json({
+      machineId: hwInfo.machine_id,
+      hostname: hwInfo.hostname,
+      hardware: {
+        cpu_id: hwInfo.cpu_id,
+        cpu_model: hwInfo.cpu_model,
+        cpu_cores: hwInfo.cpu_cores,
+        disk_serial: hwInfo.disk_serial,
+        mac_addresses: hwInfo.mac_addresses,
+        hostname: hwInfo.hostname,
+        username: hwInfo.username,
+        platform: hwInfo.platform,
+        arch: hwInfo.arch,
+        total_memory: hwInfo.total_memory,
+        machine_id: hwInfo.machine_id,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: true, message: err.message });
+  }
 });
 
 /** GET /api/license/validate — validação detalhada */
