@@ -32,7 +32,11 @@ interface MachineInfo {
   hardware: MachineHardware;
 }
 
-export default function LicenseActivationPage() {
+interface Props {
+  onActivated?: () => void;
+}
+
+export default function LicenseActivationPage({ onActivated }: Props = {}) {
   const [key, setKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -92,9 +96,13 @@ export default function LicenseActivationPage() {
       if (data.success) {
         toast.success(data.message || 'Licença ativada com sucesso!');
         await checkStatus();
-        // Redireciona para o login após ativação
+        // Notifica o App que a licença foi ativada → mostra login
         setTimeout(() => {
-          window.location.href = '/login';
+          if (onActivated) {
+            onActivated();
+          } else {
+            window.location.href = '/login';
+          }
         }, 1500);
       } else {
         toast.error(data.message || 'Falha na ativação.');
