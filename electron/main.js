@@ -23,6 +23,12 @@ const BACKEND_PORT = 3000;
 
 // ── Paths ──
 
+// Persistent data directory (survives rebuilds / reinstalls)
+// Windows: C:\Users\<user>\AppData\Roaming\Sistema de Locação\
+function getUserDataPath() {
+  return app.getPath('userData');
+}
+
 function getBackendPath() {
   if (isDev) {
     return path.join(__dirname, '..', 'backend');
@@ -48,12 +54,29 @@ function getFrontendPath() {
 // ── Backend ──
 
 function ensureDataDirs() {
-  const backendDir = getBackendPath();
-  const dataDir = path.join(backendDir, 'data');
-  const backupsDir = path.join(backendDir, 'backups');
+  // Persistent dirs inside AppData (not inside the app folder)
+  const userData = getUserDataPath();
+  const dataDir = path.join(userData, 'data');
+  const backupsDir = path.join(userData, 'backups');
 
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+
+  // Migrate old data from app folder → AppData (one-time)
+  const backendDir = getBackendPath();
+  migrateIfNeeded(path.join(backendDir, '.license'), path.join(userData, '.license'));
+  migrateIfNeeded(path.join(backendDir, 'data', 'locacao.db'), path.join(dataDir, 'locacao.db'));
+}
+
+function migrateIfNeeded(oldPath, newPath) {
+  try {
+    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
+      fs.copyFileSync(oldPath, newPath);
+      console.log(`[Migrate] ${oldPath} → ${newPath}`);
+    }
+  } catch (err) {
+    console.warn(`[Migrate] Falha ao migrar ${oldPath}:`, err.message);
+  }
 }
 
 function startBackend() {
@@ -72,15 +95,18 @@ function startBackend() {
     // (better-sqlite3 foi recompilado para o ABI do Electron via @electron/rebuild)
     const nodeExe = process.execPath;
 
+    // All persistent data lives in AppData — survives rebuilds/updates
+    const userData = getUserDataPath();
+
     backendProcess = spawn(nodeExe, [serverFile], {
       cwd: backendDir,
       env: {
         ...process.env,
         PORT: String(BACKEND_PORT),
         NODE_ENV: 'production',
-        DB_PATH: path.join(backendDir, 'data', 'locacao.db'),
-        BACKUP_DIR: path.join(backendDir, 'backups'),
-        LICENSE_PATH: path.join(backendDir, '.license'),
+        DB_PATH: path.join(userData, 'data', 'locacao.db'),
+        BACKUP_DIR: path.join(userData, 'backups'),
+        LICENSE_PATH: path.join(userData, '.license'),
         ELECTRON_RUN_AS_NODE: '1',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
