@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import toast from 'react-hot-toast';
 import { FiPlus, FiEdit2, FiTrash2, FiSearch } from 'react-icons/fi';
 
-interface PricingTier { duration_minutes: number; label: string; price: number; }
+interface PricingTier { duration_minutes: number; label: string; price: number; tolerance_minutes: number; }
 interface ItemForm { name: string; internal_code: string; category: string; status: string; observations: string; }
 
 const EMPTY_FORM: ItemForm = { name: '', internal_code: '', category: '', status: 'available', observations: '' };
@@ -22,7 +22,7 @@ export default function ItemsPage() {
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [tiers, setTiers] = useState<PricingTier[]>([{ duration_minutes: 30, label: '30 min', price: 0 }]);
+  const [tiers, setTiers] = useState<PricingTier[]>([{ duration_minutes: 30, label: '30 min', price: 0, tolerance_minutes: 0 }]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<Item | null>(null);
 
@@ -43,7 +43,7 @@ export default function ItemsPage() {
   function openNew() {
     setEditing(null);
     setForm(EMPTY_FORM);
-    setTiers([{ duration_minutes: 30, label: '30 min', price: 0 }]);
+    setTiers([{ duration_minutes: 30, label: '30 min', price: 0, tolerance_minutes: 0 }]);
     setModal(true);
   }
 
@@ -59,17 +59,17 @@ export default function ItemsPage() {
     try {
       const { data } = await api.get(`/items/${item.id}/pricing`);
       const loaded = Array.isArray(data)
-        ? data.map((t: ItemPricing) => ({ duration_minutes: t.duration_minutes, label: t.label, price: t.price }))
+        ? data.map((t: ItemPricing) => ({ duration_minutes: t.duration_minutes, label: t.label, price: t.price, tolerance_minutes: t.tolerance_minutes || 0 }))
         : [];
-      setTiers(loaded.length > 0 ? loaded : [{ duration_minutes: 60, label: '1 hora', price: item.rental_value }]);
+      setTiers(loaded.length > 0 ? loaded : [{ duration_minutes: 60, label: '1 hora', price: item.rental_value, tolerance_minutes: 0 }]);
     } catch {
-      setTiers([{ duration_minutes: 60, label: '1 hora', price: item.rental_value }]);
+      setTiers([{ duration_minutes: 60, label: '1 hora', price: item.rental_value, tolerance_minutes: 0 }]);
     }
     setModal(true);
   }
 
   function addTier() {
-    setTiers((p) => [...p, { duration_minutes: 30, label: '', price: 0 }]);
+    setTiers((p) => [...p, { duration_minutes: 30, label: '', price: 0, tolerance_minutes: 0 }]);
   }
 
   function removeTier(idx: number) {
@@ -228,6 +228,7 @@ export default function ItemsPage() {
                       <th>Nome da Faixa</th>
                       <th style={{ width: 130 }}>Duração (min)</th>
                       <th style={{ width: 130 }}>Preço (R$)</th>
+                      <th style={{ width: 120 }}>Tolerância (min)</th>
                       <th style={{ width: 50 }}></th>
                     </tr>
                   </thead>
@@ -242,6 +243,9 @@ export default function ItemsPage() {
                         </td>
                         <td>
                           <input className="form-control" type="number" min={0} step={0.01} value={tier.price} onChange={(e) => updateTier(idx, 'price', Number(e.target.value))} />
+                        </td>
+                        <td>
+                          <input className="form-control" type="number" min={0} value={tier.tolerance_minutes} onChange={(e) => updateTier(idx, 'tolerance_minutes', Number(e.target.value))} title="Tempo extra tolerado sem cobrar" />
                         </td>
                         <td>
                           <button type="button" className="btn btn-sm btn-danger" onClick={() => removeTier(idx)} title="Remover"><FiTrash2 /></button>

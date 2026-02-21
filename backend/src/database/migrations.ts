@@ -272,6 +272,32 @@ const migrations: { version: number; name: string; sql: string }[] = [
       UPDATE audit_logs SET created_at = datetime(created_at, 'localtime') WHERE created_at LIKE '%-%-% %:%:%' AND created_at NOT LIKE '%T%';
     `,
   },
+  {
+    version: 16,
+    name: 'add_client_child_fields',
+    sql: `
+      ALTER TABLE clients ADD COLUMN child_name TEXT;
+      ALTER TABLE clients ADD COLUMN birth_date TEXT;
+    `,
+  },
+  {
+    version: 17,
+    name: 'add_pricing_tolerance',
+    sql: `
+      ALTER TABLE item_pricing ADD COLUMN tolerance_minutes INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
+  {
+    version: 18,
+    name: 'create_settings_table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+      );
+    `,
+  },
 ];
 
 export function runMigrations(): void {

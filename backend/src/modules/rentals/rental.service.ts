@@ -41,6 +41,7 @@ interface RentalRow {
 
 interface RentalResponse extends RentalRow {
   client_name?: string;
+  child_name?: string;
   item_name?: string;
   item_code?: string;
   total_paid?: number;
@@ -128,7 +129,7 @@ export class RentalService {
   findAll(filters?: { status?: string; client_id?: number; item_id?: number }): RentalResponse[] {
     const db = getDatabase();
     let sql = `
-      SELECT r.*, c.name as client_name, i.name as item_name, i.internal_code as item_code,
+      SELECT r.*, c.name as client_name, c.child_name as child_name, i.name as item_name, i.internal_code as item_code,
         COALESCE((SELECT SUM(amount) FROM payments WHERE rental_id = r.id), 0) as total_paid
       FROM rentals r 
       JOIN clients c ON r.client_id = c.id 
@@ -163,7 +164,7 @@ export class RentalService {
     const db = getDatabase();
     const row = db
       .prepare(
-        `SELECT r.*, c.name as client_name, i.name as item_name, i.internal_code as item_code,
+        `SELECT r.*, c.name as client_name, c.child_name as child_name, i.name as item_name, i.internal_code as item_code,
            COALESCE((SELECT SUM(amount) FROM payments WHERE rental_id = r.id), 0) as total_paid
          FROM rentals r 
          JOIN clients c ON r.client_id = c.id 
@@ -195,15 +196,18 @@ export class RentalService {
     const actualEnd = new Date(actualEndDate);
 
     // Calculate late fee per minute based on (rental_value / duration) * minutes_late
+    // Recalculate based on actual end time (may differ from the preview applied during payment)
     let lateFee = 0;
     if (actualEnd > expectedEnd) {
-      const minutesLate = Math.ceil((actualEnd.getTime() - expectedEnd.getTime()) / 60000);
+      const minutesLate = Math.floor((actualEnd.getTime() - expectedEnd.getTime()) / 60000);
       const durationMinutes = rental.pricing_duration_minutes || 60; // fallback 60 min
-      const perMinuteRate = rental.rental_value / durationMinutes;
-      lateFee = Math.round(perMinuteRate * minutesLate * 100) / 100;
+      if (minutesLate > 0) {
+        const perMinuteRate = rental.rental_value / durationMinutes;
+        lateFee = Math.round(perMinuteRate * minutesLate * 100) / 100;
+      }
     }
 
-    const totalValue = rental.rental_value - rental.discount + lateFee;
+    const totalValue = Math.round((rental.rental_value - rental.discount + lateFee) * 100) / 100;
 
     const transaction = db.transaction(() => {
       db.prepare(

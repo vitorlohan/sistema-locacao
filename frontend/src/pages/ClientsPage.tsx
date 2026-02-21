@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import toast from 'react-hot-toast';
 import { FiPlus, FiEdit2, FiTrash2, FiSearch } from 'react-icons/fi';
 
-const EMPTY: Partial<Client> = { name: '', document: '', phone: '', email: '', address: '', observations: '' };
+const EMPTY: Partial<Client> = { name: '', document: '', phone: '', email: '', address: '', observations: '', child_name: '', birth_date: '' };
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -92,13 +92,14 @@ export default function ClientsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>Nome</th><th>Documento</th><th>Telefone</th><th>E-mail</th><th>Cadastro</th><th style={{ width: 100 }}>Ações</th>
+                  <th>Nome</th><th>Criança</th><th>Documento</th><th>Telefone</th><th>E-mail</th><th>Cadastro</th><th style={{ width: 100 }}>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {clients.map((c) => (
                   <tr key={c.id}>
                     <td><strong>{c.name}</strong></td>
+                    <td>{c.child_name || '-'}</td>
                     <td>{c.document || '-'}</td>
                     <td>{c.phone || '-'}</td>
                     <td>{c.email || '-'}</td>
@@ -122,6 +123,16 @@ export default function ClientsPage() {
             <div className="form-group">
               <label>Nome *</label>
               <input className="form-control" value={form.name ?? ''} onChange={(e) => set('name', e.target.value)} autoFocus />
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label>Nome da Criança <span style={{ color: '#9ca3af', fontWeight: 400 }}>(opcional)</span></label>
+                <input className="form-control" value={form.child_name ?? ''} onChange={(e) => set('child_name', e.target.value)} placeholder="Preencha apenas se aplicável" />
+              </div>
+              <div className="form-group">
+                <label>Data de Nasc. da Criança <span style={{ color: '#9ca3af', fontWeight: 400 }}>(opcional)</span></label>
+                <input className="form-control" type="date" value={form.birth_date ?? ''} onChange={(e) => set('birth_date', e.target.value)} />
+              </div>
             </div>
             <div className="form-row">
               <div className="form-group">

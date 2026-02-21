@@ -11,6 +11,7 @@ import RentalsPage from './pages/RentalsPage';
 import CashierPage from './pages/CashierPage';
 import ReportsPage from './pages/ReportsPage';
 import BackupPage from './pages/BackupPage';
+import SettingsPage from './pages/SettingsPage';
 import api from './services/api';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -82,6 +83,7 @@ export default function App() {
                 <Route path="/caixa" element={<CashierPage />} />
                 <Route path="/relatorios" element={<ReportsPage />} />
                 <Route path="/backups" element={<BackupPage />} />
+                <Route path="/configuracoes" element={<SettingsPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

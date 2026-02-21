@@ -8,6 +8,8 @@ interface CreateClientInput {
   email?: string;
   address?: string;
   observations?: string;
+  child_name?: string;
+  birth_date?: string;
 }
 
 interface UpdateClientInput {
@@ -18,6 +20,8 @@ interface UpdateClientInput {
   address?: string;
   observations?: string;
   active?: boolean;
+  child_name?: string;
+  birth_date?: string;
 }
 
 interface ClientRow {
@@ -28,6 +32,8 @@ interface ClientRow {
   email: string | null;
   address: string | null;
   observations: string | null;
+  child_name: string | null;
+  birth_date: string | null;
   active: number;
   created_at: string;
   updated_at: string;
@@ -41,6 +47,8 @@ interface ClientResponse {
   email: string | null;
   address: string | null;
   observations: string | null;
+  child_name: string | null;
+  birth_date: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -53,6 +61,8 @@ function decryptClient(row: ClientRow): ClientResponse {
     document: row.document ? decrypt(row.document) : null,
     phone: row.phone ? decrypt(row.phone) : null,
     observations: row.observations ? decrypt(row.observations) : null,
+    child_name: row.child_name || null,
+    birth_date: row.birth_date || null,
   };
 }
 
@@ -62,8 +72,8 @@ export class ClientService {
 
     const result = db
       .prepare(
-        `INSERT INTO clients (name, document, phone, email, address, observations) 
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO clients (name, document, phone, email, address, observations, child_name, birth_date) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         input.name,
@@ -71,7 +81,9 @@ export class ClientService {
         input.phone ? encrypt(input.phone) : null,
         input.email || null,
         input.address || null,
-        input.observations ? encrypt(input.observations) : null
+        input.observations ? encrypt(input.observations) : null,
+        input.child_name || null,
+        input.birth_date || null
       );
 
     return this.findById(result.lastInsertRowid as number);
@@ -143,6 +155,14 @@ export class ClientService {
     if (input.active !== undefined) {
       fields.push('active = ?');
       values.push(input.active ? 1 : 0);
+    }
+    if (input.child_name !== undefined) {
+      fields.push('child_name = ?');
+      values.push(input.child_name || null);
+    }
+    if (input.birth_date !== undefined) {
+      fields.push('birth_date = ?');
+      values.push(input.birth_date || null);
     }
 
     if (fields.length === 0) {

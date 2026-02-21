@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import {
   FiHome, FiUsers, FiBox, FiFileText,
-  FiDollarSign, FiBarChart2, FiDatabase, FiLogOut, FiMenu, FiX,
+  FiDollarSign, FiBarChart2, FiDatabase, FiSettings, FiLogOut, FiMenu, FiX,
 } from 'react-icons/fi';
 
 const NAV = [
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/caixa', icon: FiDollarSign, label: 'Caixa' },
   { to: '/relatorios', icon: FiBarChart2, label: 'Relatórios' },
   { to: '/backups', icon: FiDatabase, label: 'Backups' },
+  { to: '/configuracoes', icon: FiSettings, label: 'Configurações' },
 ];
 
 const TITLES: Record<string, string> = {
@@ -24,6 +25,7 @@ const TITLES: Record<string, string> = {
   '/caixa': 'Caixa',
   '/relatorios': 'Relatórios',
   '/backups': 'Backups',
+  '/configuracoes': 'Configurações',
 };
 
 export default function Layout({ children }: { children: ReactNode }) {

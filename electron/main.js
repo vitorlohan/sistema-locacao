@@ -199,8 +199,19 @@ function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
-  // Links externos abrem no navegador padrão
+  // Links externos abrem no navegador padrão, mas blob: URLs abrem localmente (recibos)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('blob:') || url === '' || url === 'about:blank') {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 400,
+          height: 650,
+          autoHideMenuBar: true,
+          title: 'Recibo',
+        },
+      };
+    }
     shell.openExternal(url);
     return { action: 'deny' };
   });

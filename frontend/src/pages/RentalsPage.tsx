@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback, type FormEvent } from 'react';
+import { useEffect, useState, useCallback, useRef, type FormEvent } from 'react';
 import api from '../services/api';
 import type { Rental, Client, Item, PaymentBalance, ItemPricing } from '../types';
 import { fmtCurrency, fmtDateTime, RENTAL_STATUS_LABELS, RENTAL_PERIOD_LABELS, PAYMENT_METHOD_LABELS, statusBadgeClass, generateReceipt } from '../utils/helpers';
+import { generatePixQRCode, copyPixPayload, type PixConfig } from '../utils/pix';
 import Modal from '../components/Modal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import toast from 'react-hot-toast';
-import { FiPlus, FiCheck, FiXCircle, FiDollarSign, FiRefreshCw, FiFileText, FiSend } from 'react-icons/fi';
+import { FiPlus, FiCheck, FiXCircle, FiDollarSign, FiRefreshCw, FiFileText, FiSend, FiClock, FiCopy } from 'react-icons/fi';
 
 export default function RentalsPage() {
   const [rentals, setRentals] = useState<Rental[]>([]);
@@ -39,6 +40,46 @@ export default function RentalsPage() {
   const [cashierAmount, setCashierAmount] = useState(0);
   const [sendingCashier, setSendingCashier] = useState(false);
 
+  /* Late fee preview */
+  const [lateFeePreview, setLateFeePreview] = useState(0);
+  const [includeLateFee, setIncludeLateFee] = useState(true);
+
+  /* PIX QR Code */
+  const [pixQR, setPixQR] = useState<string>('');
+  const [pixConfig, setPixConfig] = useState<PixConfig | null>(null);
+
+  /* Elapsed time ticker */
+  const [tick, setTick] = useState(0);
+  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    tickRef.current = setInterval(() => setTick((t) => t + 1), 30000); // update every 30s
+    return () => { if (tickRef.current) clearInterval(tickRef.current); };
+  }, []);
+
+  function elapsedTime(startDate: string): string {
+    const start = new Date(startDate.replace(' ', 'T'));
+    const now = new Date();
+    const diffMs = now.getTime() - start.getTime();
+    if (diffMs < 0) return '00:00';
+    const totalMin = Math.floor(diffMs / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  }
+
+  function calcLateFee(rental: Rental): number {
+    if (rental.status !== 'overdue' && rental.status !== 'active') return 0;
+    const now = new Date();
+    const expectedEnd = new Date(rental.expected_end_date.replace(' ', 'T'));
+    if (now <= expectedEnd) return 0;
+    const minutesLate = Math.floor((now.getTime() - expectedEnd.getTime()) / 60000);
+    if (minutesLate <= 0) return 0;
+    const durationMinutes = rental.pricing_duration_minutes || 60;
+    const perMinuteRate = rental.rental_value / durationMinutes;
+    return Math.round(perMinuteRate * minutesLate * 100) / 100;
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -49,11 +90,39 @@ export default function RentalsPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  /* Load PIX config once */
+  useEffect(() => {
+    api.get('/settings', { params: { prefix: 'pix.' } }).then(({ data }) => {
+      if (data?.['pix.key'] && data?.['pix.merchant_name']) {
+        setPixConfig({
+          pixKey: data['pix.key'],
+          pixKeyType: data['pix.key_type'] || 'cpf',
+          merchantName: data['pix.merchant_name'],
+          merchantCity: data['pix.merchant_city'] || 'SaoPaulo',
+        });
+      }
+    }).catch(() => { /* no pix config yet */ });
+  }, []);
+
+  /* Generate PIX QR when payment method is pix and we have config */
+  useEffect(() => {
+    if (payForm.payment_method === 'pix' && pixConfig && payForm.amount > 0 && payModal) {
+      generatePixQRCode(pixConfig, payForm.amount, `LOC${payModal.id}`)
+        .then(setPixQR)
+        .catch(() => setPixQR(''));
+    } else {
+      setPixQR('');
+    }
+  }, [payForm.payment_method, payForm.amount, pixConfig, payModal]);
+
   async function openNew() {
     const [c, i] = await Promise.all([api.get('/clients'), api.get('/items', { params: { status: 'available' } })]);
     setClients(Array.isArray(c.data) ? c.data : []);
     setItems(Array.isArray(i.data) ? i.data : []);
-    setNewForm({ client_id: '', item_id: '', start_date: '', expected_end_date: '', deposit: 0, discount: 0, observations: '', pricing_id: '' });
+    // Auto-fill start date with current local time
+    const now = new Date();
+    const nowStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setNewForm({ client_id: '', item_id: '', start_date: nowStr, expected_end_date: '', deposit: 0, discount: 0, observations: '', pricing_id: '' });
     setItemPricingTiers([]);
     setNewModal(true);
   }
@@ -107,10 +176,14 @@ export default function RentalsPage() {
     // Fetch current balance to check debt
     try {
       const { data } = await api.get(`/payments/balance/${r.id}`);
-      if (data.remaining > 0) {
+      const fee = calcLateFee(r);
+      const remainingWithFee = data.remaining + fee;
+      if (remainingWithFee > 0) {
         // Has debt — open payment modal with finalize context
+        setLateFeePreview(fee);
+        setIncludeLateFee(fee > 0);
         setPayBalance(data);
-        setPayForm({ amount: data.remaining, payment_method: 'pix', notes: '' });
+        setPayForm({ amount: fee > 0 ? data.remaining + fee : data.remaining, payment_method: 'pix', notes: '' });
         setPayModal(r);
         setCompleteAfterPay(true);
         return;
@@ -153,8 +226,11 @@ export default function RentalsPage() {
   async function openPay(r: Rental) {
     try {
       const { data } = await api.get(`/payments/balance/${r.id}`);
+      const fee = calcLateFee(r);
+      setLateFeePreview(fee);
+      setIncludeLateFee(fee > 0);
       setPayBalance(data);
-      setPayForm({ amount: data.remaining, payment_method: 'pix', notes: '' });
+      setPayForm({ amount: fee > 0 ? data.remaining + fee : data.remaining, payment_method: 'pix', notes: '' });
       setPayModal(r);
     } catch { /* toast shown by interceptor */ }
   }
@@ -247,18 +323,30 @@ export default function RentalsPage() {
             <table>
               <thead>
                 <tr>
-                  <th>#</th><th>Cliente</th><th>Item</th><th>Início</th><th>Prev. Devolução</th>
+                  <th>#</th><th>Cliente</th><th>Criança</th><th>Item</th><th>Início</th><th>Prev.Entrega</th><th>Tempo / Entrega</th>
                   <th>Valor</th><th>Pago</th><th>Status</th><th>Ações</th>
                 </tr>
               </thead>
               <tbody>
                 {rentals.map((r) => (
-                  <tr key={r.id}>
+                  <tr key={r.id} style={(r.status === 'overdue') ? { background: '#fef2f2' } : undefined}>
                     <td>{r.id}</td>
                     <td>{r.client_name}</td>
+                    <td>{r.child_name || '-'}</td>
                     <td>{r.item_name} <small style={{ color: '#9ca3af' }}>({r.item_code})</small></td>
                     <td>{fmtDateTime(r.start_date)}</td>
-                    <td>{fmtDateTime(r.expected_end_date)}</td>
+                    <td style={{ fontSize: '.85rem', color: '#6b7280' }}>{fmtDateTime(r.expected_end_date)}</td>
+                    <td>
+                      {(r.status === 'active' || r.status === 'overdue') ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600, color: r.status === 'overdue' ? '#dc2626' : '#2563eb', fontFamily: 'monospace' }}>
+                          <FiClock size={13} /> {elapsedTime(r.start_date)}
+                        </span>
+                      ) : r.actual_end_date ? (
+                        <span style={{ color: '#16a34a', fontSize: '.85rem' }}>{fmtDateTime(r.actual_end_date)}</span>
+                      ) : (
+                        <span style={{ color: '#9ca3af', fontSize: '.85rem' }}>-</span>
+                      )}
+                    </td>
                     <td>{fmtCurrency(r.total_value)}</td>
                     <td>
                       <span style={{ color: r.total_paid >= r.total_value ? '#16a34a' : r.total_paid > 0 ? '#d97706' : '#dc2626', fontWeight: 600 }}>
@@ -296,7 +384,7 @@ export default function RentalsPage() {
                 <label>Cliente *</label>
                 <select className="form-control" value={newForm.client_id} onChange={(e) => setNewForm((p) => ({ ...p, client_id: e.target.value }))}>
                   <option value="">Selecione...</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.child_name ? ` (${c.child_name})` : ''}</option>)}
                 </select>
               </div>
               <div className="form-group">
@@ -373,7 +461,7 @@ export default function RentalsPage() {
 
       {/* Payment Modal */}
       {payModal && payBalance && (
-        <Modal title={completeAfterPay ? `Débito Pendente - ${payModal.item_name}` : `Pagamento - ${payModal.item_name}`} onClose={() => { setPayModal(null); setCompleteAfterPay(false); }}>
+        <Modal title={completeAfterPay ? `Débito Pendente - ${payModal.item_name}` : `Pagamento - ${payModal.item_name}`} onClose={() => { setPayModal(null); setCompleteAfterPay(false); setLateFeePreview(0); }}>
           {completeAfterPay && (
             <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: '.85rem', color: '#92400e' }}>
               <strong>⚠️ Aluguel com débito em aberto.</strong> Registre o pagamento para finalizar, ou force a finalização.
@@ -384,7 +472,45 @@ export default function RentalsPage() {
             <p>Pago: <strong>{fmtCurrency(payBalance.total_paid)}</strong></p>
             <p>Restante: <strong style={{ color: payBalance.remaining > 0 ? '#dc2626' : '#16a34a' }}>{fmtCurrency(payBalance.remaining)}</strong></p>
           </div>
-          {payBalance.remaining <= 0 ? (
+          {/* Late fee preview */}
+          {lateFeePreview > 0 && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: 12, borderRadius: 8, marginBottom: 16, fontSize: '.85rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ color: '#991b1b', fontWeight: 600 }}>⏱️ Taxa de Atraso</span>
+                <strong style={{ color: '#dc2626' }}>+ {fmtCurrency(lateFeePreview)}</strong>
+              </div>
+              <p style={{ color: '#7f1d1d', fontSize: '.8rem', margin: '0 0 8px 0' }}>
+                {(() => {
+                  const expectedEnd = new Date(payModal.expected_end_date.replace(' ', 'T'));
+                  const minutesLate = Math.floor((Date.now() - expectedEnd.getTime()) / 60000);
+                  const durationMinutes = payModal.pricing_duration_minutes || 60;
+                  const perMinuteRate = payModal.rental_value / durationMinutes;
+                  return `${minutesLate} min atrasado × ${fmtCurrency(perMinuteRate)}/min`;
+                })()}
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={includeLateFee}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIncludeLateFee(checked);
+                    setPayForm((p) => ({
+                      ...p,
+                      amount: checked ? payBalance.remaining + lateFeePreview : payBalance.remaining,
+                    }));
+                  }}
+                />
+                <span style={{ color: '#991b1b', fontWeight: 500 }}>Incluir taxa de atraso no pagamento</span>
+              </label>
+              {includeLateFee && (
+                <p style={{ color: '#991b1b', fontWeight: 600, marginTop: 6, fontSize: '.85rem' }}>
+                  Total a pagar: {fmtCurrency(payBalance.remaining)} + {fmtCurrency(lateFeePreview)} = <strong>{fmtCurrency(payBalance.remaining + lateFeePreview)}</strong>
+                </p>
+              )}
+            </div>
+          )}
+          {payBalance.remaining <= 0 && lateFeePreview <= 0 ? (
             <div style={{ textAlign: 'center' }}>
               <p style={{ color: '#16a34a', fontWeight: 600, marginBottom: 12 }}>Totalmente pago!</p>
               {completeAfterPay && (
@@ -396,7 +522,7 @@ export default function RentalsPage() {
               <div className="form-row">
                 <div className="form-group">
                   <label>Valor *</label>
-                  <input className="form-control" type="number" min={0.01} step={0.01} max={payBalance.remaining} value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: Number(e.target.value) }))} />
+                  <input className="form-control" type="number" min={0.01} step={0.01} value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: Number(e.target.value) }))} />
                 </div>
                 <div className="form-group">
                   <label>Forma de Pagamento</label>
@@ -405,14 +531,40 @@ export default function RentalsPage() {
                   </select>
                 </div>
               </div>
+              {/* PIX QR Code */}
+              {payForm.payment_method === 'pix' && pixQR && (
+                <div style={{ textAlign: 'center', padding: 16, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: 12 }}>
+                  <p style={{ fontWeight: 600, fontSize: '.9rem', marginBottom: 8, color: '#15803d' }}>PIX QR Code</p>
+                  <img src={pixQR} alt="PIX QR Code" style={{ width: 220, height: 220, margin: '0 auto' }} />
+                  <p style={{ fontSize: '.75rem', color: '#6b7280', marginTop: 8 }}>Escaneie o QR Code com o app do seu banco</p>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      if (pixConfig && payModal) {
+                        copyPixPayload(pixConfig, payForm.amount, `LOC${payModal.id}`);
+                        toast.success('Código PIX copiado!');
+                      }
+                    }}
+                  >
+                    <FiCopy /> Copiar Pix Copia e Cola
+                  </button>
+                </div>
+              )}
+              {payForm.payment_method === 'pix' && !pixConfig && (
+                <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: '.8rem', color: '#92400e' }}>
+                  Configure a chave PIX nas Configurações para gerar QR Codes automaticamente.
+                </div>
+              )}
               <div className="form-group">
                 <label>Observações</label>
                 <input className="form-control" value={payForm.notes} onChange={(e) => setPayForm((p) => ({ ...p, notes: e.target.value }))} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-                <button type="button" className="btn btn-outline" onClick={() => { setPayModal(null); setCompleteAfterPay(false); }}>Cancelar</button>
+                <button type="button" className="btn btn-outline" onClick={() => { setPayModal(null); setCompleteAfterPay(false); setLateFeePreview(0); }}>Cancelar</button>
                 {completeAfterPay && (
-                  <button type="button" className="btn btn-warning" onClick={() => { setPayModal(null); setCompleteAfterPay(false); setForceComplete(payModal); }}>Forçar Finalização</button>
+                  <button type="button" className="btn btn-warning" onClick={() => { setPayModal(null); setCompleteAfterPay(false); setLateFeePreview(0); setForceComplete(payModal); }}>Forçar Finalização</button>
                 )}
                 <button type="submit" className="btn btn-success" disabled={saving}>{saving ? 'Salvando...' : 'Registrar Pagamento'}</button>
               </div>

@@ -75,6 +75,7 @@ export function statusBadgeClass(status: string): string {
 export function generateReceipt(rental: {
   id: number;
   client_name: string;
+  child_name?: string | null;
   item_name: string;
   item_code: string;
   start_date: string;
@@ -93,12 +94,25 @@ export function generateReceipt(rental: {
   const dateStr = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const remaining = rental.total_value - rental.total_paid;
 
+  // Calculate elapsed time
+  let elapsedStr = '';
+  if (rental.actual_end_date) {
+    const start = new Date(rental.start_date.replace(' ', 'T'));
+    const end = new Date(rental.actual_end_date.replace(' ', 'T'));
+    const diffMs = end.getTime() - start.getTime();
+    const totalMin = Math.max(0, Math.floor(diffMs / 60000));
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    const s = Math.floor((diffMs % 60000) / 1000);
+    elapsedStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
   const html = `
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>NF #${rental.id}</title>
+  <title>Recibo #${rental.id}</title>
   <style>
     @page { margin: 0; size: 80mm auto; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -124,15 +138,11 @@ export function generateReceipt(rental: {
     .big-total { font-size: 16px; font-weight: bold; }
     .small { font-size: 10px; color: #333; }
     .status-paid { font-weight: bold; }
-    .no-print { text-align: center; margin-bottom: 8px; }
-    .no-print button { background: #000; color: #fff; border: none; padding: 8px 20px; cursor: pointer; font-family: inherit; font-size: 12px; }
-    @media print { .no-print { display: none !important; } body { padding: 2mm; } }
+    @media print { body { padding: 2mm; } }
     @media screen { body { border: 1px solid #ccc; margin: 20px auto; padding: 8mm 5mm; } }
   </style>
 </head>
 <body>
-  <div class="no-print"><button onclick="window.print()">IMPRIMIR</button></div>
-
   <div class="center title">RECIBO DE LOCAÇÃO</div>
   <div class="center small">Documento não fiscal</div>
   <div class="divider"></div>
@@ -141,8 +151,9 @@ export function generateReceipt(rental: {
   <div class="center small">${dateStr}</div>
   <div class="divider"></div>
 
-  <div class="bold">CLIENTE</div>
+  <div class="bold">RESPONSÁVEL</div>
   <div>${rental.client_name}</div>
+  ${rental.child_name ? `<div>Criança: ${rental.child_name}</div>` : ''}
   <div class="divider"></div>
 
   <div class="bold">ITEM</div>
@@ -154,6 +165,7 @@ export function generateReceipt(rental: {
   <div class="row"><span class="label">Início:</span><span class="value">${fmtDateTime(rental.start_date)}</span></div>
   <div class="row"><span class="label">Prev. Dev.:</span><span class="value">${fmtDateTime(rental.expected_end_date)}</span></div>
   ${rental.actual_end_date ? `<div class="row"><span class="label">Devolução:</span><span class="value">${fmtDateTime(rental.actual_end_date)}</span></div>` : ''}
+  ${elapsedStr ? `<div class="row"><span class="label">Permanência:</span><span class="value">${elapsedStr}</span></div>` : ''}
   <div class="divider"></div>
 
   <div class="bold">VALORES</div>
@@ -182,9 +194,37 @@ export function generateReceipt(rental: {
 </html>
   `.trim();
 
-  const w = window.open('', '_blank', 'width=320,height=600');
-  if (w) {
-    w.document.write(html);
-    w.document.close();
+  // Use iframe approach that works in Electron (window.open is blocked)
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (doc) {
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Wait for content to render, then print
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.print();
+      } catch {
+        // Fallback: show in a blob URL opened in same window
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+      // Remove iframe after printing
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 2000);
+    }, 500);
   }
 }

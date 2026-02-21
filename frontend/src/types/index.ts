@@ -25,6 +25,8 @@ export interface Client {
   email: string;
   address: string;
   observations: string;
+  child_name?: string;
+  birth_date?: string;
   active: number;
   created_at: string;
   updated_at: string;
@@ -55,6 +57,7 @@ export interface ItemPricing {
   label: string;
   price: number;
   sort_order: number;
+  tolerance_minutes: number;
 }
 
 /* ───── Rentals ───── */
@@ -75,9 +78,11 @@ export interface Rental {
   total_paid: number;
   status: RentalStatus;
   observations: string;
+  pricing_duration_minutes: number | null;
   created_at: string;
   updated_at: string;
   client_name: string;
+  child_name?: string | null;
   item_name: string;
   item_code: string;
 }

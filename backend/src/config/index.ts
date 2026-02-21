@@ -1,5 +1,7 @@
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
+import fs from 'fs';
 
 function getLocalIP(): string {
   const interfaces = os.networkInterfaces();
@@ -15,6 +17,62 @@ function getLocalIP(): string {
   return '0.0.0.0';
 }
 
+// ── Persistent secrets management ──
+// Secrets are auto-generated on first run and persisted in the data directory.
+// No hardcoded secrets in source code. Override via environment variables.
+
+interface PersistedSecrets {
+  jwtSecret: string;
+  jwtRefreshSecret: string;
+  encryptionKey: string;
+  licenseSecret: string;
+}
+
+function getSecretsFilePath(): string {
+  const dbPath = path.resolve(process.env.DB_PATH || './data/locacao.db');
+  return path.join(path.dirname(dbPath), '.secrets.json');
+}
+
+function loadOrGenerateSecrets(): PersistedSecrets {
+  const secretsPath = getSecretsFilePath();
+
+  // 1. Try loading existing persisted secrets
+  try {
+    if (fs.existsSync(secretsPath)) {
+      const data = JSON.parse(fs.readFileSync(secretsPath, 'utf-8'));
+      if (data.jwtSecret && data.jwtRefreshSecret && data.encryptionKey && data.licenseSecret) {
+        return data;
+      }
+    }
+  } catch {
+    console.warn('[Config] Falha ao ler .secrets.json, regenerando...');
+  }
+
+  // 2. Generate new unique secrets for this installation
+  const secrets: PersistedSecrets = {
+    jwtSecret: crypto.randomBytes(32).toString('hex'),
+    jwtRefreshSecret: crypto.randomBytes(32).toString('hex'),
+    encryptionKey: crypto.randomBytes(32).toString('hex'),
+    licenseSecret: crypto.randomBytes(24).toString('hex'),
+  };
+
+  // 3. Persist to data directory
+  try {
+    const dir = path.dirname(secretsPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(secretsPath, JSON.stringify(secrets, null, 2), 'utf-8');
+    console.log('[Config] Secrets gerados e salvos com sucesso.');
+  } catch (err: any) {
+    console.warn('[Config] Não foi possível salvar secrets:', err.message);
+  }
+
+  return secrets;
+}
+
+const secrets = loadOrGenerateSecrets();
+
 const config = {
   server: {
     port: parseInt(process.env.PORT || '3000', 10),
@@ -27,14 +85,14 @@ const config = {
   },
 
   jwt: {
-    secret: process.env.JWT_SECRET || 'sistema-locacao-secret-key-offline-2026',
-    refreshSecret: process.env.JWT_REFRESH_SECRET || 'sistema-locacao-refresh-secret-2026',
+    secret: process.env.JWT_SECRET || secrets.jwtSecret,
+    refreshSecret: process.env.JWT_REFRESH_SECRET || secrets.jwtRefreshSecret,
     expiresIn: process.env.JWT_EXPIRES_IN || '30m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
 
   encryption: {
-    key: process.env.ENCRYPTION_KEY || 'locacao-encryption-key-32chars!!',
+    key: process.env.ENCRYPTION_KEY || secrets.encryptionKey,
   },
 
   backup: {
@@ -59,7 +117,7 @@ const config = {
 
   license: {
     serverUrl: process.env.LICENSE_SERVER_URL || 'https://central-licencas.onrender.com',
-    secret: process.env.LICENSE_SECRET || 'sistema-locacao-license-secret-2026!',
+    secret: process.env.LICENSE_SECRET || secrets.licenseSecret,
     storagePath: path.resolve(process.env.LICENSE_PATH || './.license'),
   },
 };

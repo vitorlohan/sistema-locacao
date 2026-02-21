@@ -9,7 +9,7 @@ interface CreateItemInput {
   rental_period?: string;
   status?: string;
   observations?: string;
-  pricing_tiers?: { duration_minutes: number; label: string; price: number }[];
+  pricing_tiers?: { duration_minutes: number; label: string; price: number; tolerance_minutes?: number }[];
 }
 
 interface UpdateItemInput {
@@ -72,10 +72,10 @@ export class ItemService {
     // Save pricing tiers if provided
     if (tiers.length > 0) {
       const insertTier = db.prepare(
-        'INSERT INTO item_pricing (item_id, duration_minutes, label, price, sort_order) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO item_pricing (item_id, duration_minutes, label, price, tolerance_minutes, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
       );
       tiers.forEach((tier, idx) => {
-        insertTier.run(itemId, tier.duration_minutes, tier.label, tier.price, idx);
+        insertTier.run(itemId, tier.duration_minutes, tier.label, tier.price, tier.tolerance_minutes || 0, idx);
       });
     }
 
@@ -183,7 +183,7 @@ export class ItemService {
       .all(itemId) as any[];
   }
 
-  savePricing(itemId: number, tiers: { duration_minutes: number; label: string; price: number }[]): any[] {
+  savePricing(itemId: number, tiers: { duration_minutes: number; label: string; price: number; tolerance_minutes?: number }[]): any[] {
     const db = getDatabase();
     this.findById(itemId);
 
@@ -193,10 +193,10 @@ export class ItemService {
 
       // Insert all tiers
       const insert = db.prepare(
-        'INSERT INTO item_pricing (item_id, duration_minutes, label, price, sort_order) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO item_pricing (item_id, duration_minutes, label, price, tolerance_minutes, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
       );
       tiers.forEach((tier, idx) => {
-        insert.run(itemId, tier.duration_minutes, tier.label, tier.price, idx);
+        insert.run(itemId, tier.duration_minutes, tier.label, tier.price, tier.tolerance_minutes || 0, idx);
       });
     });
 

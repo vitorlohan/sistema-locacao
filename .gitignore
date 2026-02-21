@@ -8,6 +8,7 @@ dist/
 # Environment
 .env
 .env.*
+!.env.example
 *.local
 
 # Electron
@@ -19,6 +20,8 @@ release/
 
 # Build artifacts
 installer/
+backend/public/
+sign-and-build.ps1
 
 # Data & Database
 data/
@@ -26,6 +29,7 @@ backups/
 *.db
 *.db-shm
 *.db-wal
+.secrets.json
 
 # License
 .license

@@ -29,9 +29,34 @@ export class PaymentService {
   create(input: CreatePaymentInput): PaymentResponse {
     const db = getDatabase();
 
-    // Verify rental exists
-    const rental = db.prepare('SELECT id, status, total_value FROM rentals WHERE id = ?').get(input.rental_id) as any;
+    // Verify rental exists and get full info for late fee calculation
+    const rental = db.prepare(
+      `SELECT r.id, r.status, r.total_value, r.rental_value, r.discount, r.late_fee,
+              r.expected_end_date, r.pricing_duration_minutes
+       FROM rentals r WHERE r.id = ?`
+    ).get(input.rental_id) as any;
     if (!rental) throw new NotFoundError('Aluguel');
+
+    // If rental is overdue/active and past expected_end_date, apply late fee to total_value BEFORE validating payment
+    if ((rental.status === 'overdue' || rental.status === 'active') && rental.expected_end_date) {
+      const now = new Date();
+      const expectedEnd = new Date(rental.expected_end_date);
+      if (now > expectedEnd) {
+        const minutesLate = Math.floor((now.getTime() - expectedEnd.getTime()) / 60000);
+        const durationMinutes = rental.pricing_duration_minutes || 60;
+        const perMinuteRate = rental.rental_value / durationMinutes;
+        const lateFee = minutesLate > 0 ? Math.round(perMinuteRate * minutesLate * 100) / 100 : 0;
+        const newTotalValue = Math.round((rental.rental_value - rental.discount + lateFee) * 100) / 100;
+
+        if (lateFee !== rental.late_fee || newTotalValue !== rental.total_value) {
+          db.prepare(
+            `UPDATE rentals SET late_fee = ?, total_value = ?, updated_at = datetime('now','localtime') WHERE id = ?`
+          ).run(lateFee, newTotalValue, rental.id);
+          rental.total_value = newTotalValue;
+          rental.late_fee = lateFee;
+        }
+      }
+    }
 
     // Calculate already paid
     const paid = db

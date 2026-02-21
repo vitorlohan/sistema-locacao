@@ -20,6 +20,7 @@ import { paymentRoutes } from './modules/payments';
 import { reportRoutes } from './modules/reports';
 import { backupRoutes } from './modules/backup';
 import { cashierRoutes } from './modules/cashier';
+import { settingsRoutes } from './modules/settings';
 
 const app = express();
 
@@ -73,6 +74,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/cashier', cashierRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // SPA fallback: rotas que não são /api retornam index.html
 if (fs.existsSync(publicDir)) {
